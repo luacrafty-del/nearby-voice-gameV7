@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Nearby — proximity voice world</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0e0d;
+    --panel:#12716a1a;
+    --line:#1e2b28;
+    --ink:#e9f5f1;
+    --dim:#7fa89e;
+    --accent:#3ee6b8;
+    --danger:#ff6b5e;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:var(--ink);}
+  #game{position:fixed;inset:0;display:block;}
+
+  /* ---- Landing / menu ---- */
+  #menu{
+    position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at 50% 20%, #10201c 0%, #070908 70%);
+    z-index:20;
+  }
+  .card{
+    width:min(420px,90vw);
+    background:#0f1614;
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:28px 26px;
+  }
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 10px 2px var(--accent);}
+  h1{font-size:22px;margin:0;letter-spacing:0.3px;font-weight:600;}
+  .sub{color:var(--dim);font-size:13.5px;margin:6px 0 22px 0;line-height:1.5;}
+  .row{display:flex;gap:10px;margin-bottom:12px;}
+  input[type=text]{
+    flex:1;background:#0a0f0d;border:1px solid var(--line);color:var(--ink);
+    border-radius:8px;padding:12px 14px;font-size:15px;letter-spacing:2px;text-transform:uppercase;
+    outline:none;
+  }
+  input[type=text]:focus{border-color:var(--accent);}
+  button{
+    cursor:pointer;border:none;border-radius:8px;font-size:14.5px;font-weight:600;
+    padding:12px 16px;transition:transform .08s ease, opacity .15s ease;
+    font-family:inherit;
+  }
+  button:active{transform:scale(0.96);}
+  button:disabled{opacity:.5;cursor:not-allowed;}
+  .btn-primary{background:var(--accent);color:#02201a;}
+  .btn-primary:hover{opacity:.9;}
+  .btn-ghost{background:transparent;border:1px solid var(--line);color:var(--ink);}
+  .btn-ghost:hover{border-color:var(--accent);}
+  .divider{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:12px;margin:18px 0;}
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line);}
+  #createBtn{width:100%;}
+  #joinRow input{width:100%;}
+  #menuMsg{min-height:18px;font-size:13px;color:var(--danger);margin-top:10px;}
+  .name-row{margin-bottom:16px;}
+  .name-row input{width:100%;text-transform:none;letter-spacing:normal;}
+  .name-row label{display:block;font-size:12px;color:var(--dim);margin-bottom:6px;}
+
+  /* ---- Waiting / connecting overlay ---- */
+  #connectOverlay{
+    position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:#070908;z-index:19;flex-direction:column;gap:14px;
+  }
+  .spinner{width:34px;height:34px;border-radius:50%;border:3px solid var(--line);
+    border-top-color:var(--accent);animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* ---- Play prompt (pointer lock / mic gesture) ---- */
+  #playOverlay{
+    position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(4,8,7,0.75);z-index:18;
+  }
+  #playOverlay .card{text-align:center;}
+
+  /* ---- HUD ---- */
+  #hud{position:fixed;top:14px;left:14px;z-index:10;display:none;flex-direction:column;gap:8px;
+    pointer-events:none;}
+  .pill{background:#0d1512cc;border:1px solid var(--line);border-radius:20px;
+    padding:7px 14px;font-size:12.5px;color:var(--dim);display:flex;align-items:center;gap:8px;
+    pointer-events:auto;backdrop-filter:blur(4px);}
+  .pill b{color:var(--ink);letter-spacing:1.5px;}
+  #copyBtn{background:none;border:none;color:var(--accent);font-size:12px;padding:0 2px;cursor:pointer;}
+
+  #topRight{position:fixed;top:14px;right:14px;z-index:10;display:none;gap:8px;}
+  #topRight button{background:#0d1512cc;border:1px solid var(--line);color:var(--ink);
+    border-radius:20px;padding:9px 14px;font-size:13px;display:flex;align-items:center;gap:6px;}
+  #topRight button:hover{border-color:var(--accent);}
+  #micBtn.muted{color:var(--danger);border-color:#4a2320;}
+
+  #crosshair{position:fixed;top:50%;left:50%;width:6px;height:6px;margin:-3px 0 0 -3px;
+    border-radius:50%;background:#ffffffaa;z-index:9;display:none;}
+
+  #toast{position:fixed;bottom:110px;left:50%;transform:translateX(-50%);
+    background:#0d1512ee;border:1px solid var(--line);border-radius:10px;padding:9px 16px;
+    font-size:13px;color:var(--ink);z-index:15;display:none;max-width:80vw;text-align:center;}
+
+  /* ---- Mobile controls ---- */
+  #joyZone{position:fixed;left:26px;bottom:26px;width:130px;height:130px;z-index:11;
+    display:none;touch-action:none;}
+  #joyBase{position:absolute;inset:0;border-radius:50%;background:#0d1512aa;border:1px solid var(--line);}
+  #joyStick{position:absolute;width:56px;height:56px;border-radius:50%;background:#3ee6b855;
+    border:1px solid var(--accent);left:37px;top:37px;pointer-events:none;}
+  #lookZone{position:fixed;right:0;bottom:0;width:55vw;height:100vh;z-index:6;touch-action:none;display:none;}
+
+  #desktopHint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:10;
+    color:var(--dim);font-size:12px;display:none;}
+
+  ::selection{background:var(--accent);color:#02201a;}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+<div id="crosshair"></div>
+
+<!-- Landing -->
+<div id="menu">
+  <div class="card">
+    <div class="brand"><div class="dot"></div><h1>Nearby</h1></div>
+    <div class="sub">A small shared world. Voice fades with distance — walk up to someone to hear them clearly.</div>
+
+    <div class="name-row">
+      <label>Your name</label>
+      <input type="text" id="nameInput" placeholder="Wanderer" maxlength="16" style="text-transform:none;letter-spacing:normal;">
+    </div>
+
+    <button class="btn-primary" id="createBtn">Create a room</button>
+
+    <div class="divider">or join one</div>
+
+    <div class="row" id="joinRow">
+      <input type="text" id="codeInput" placeholder="ROOM CODE" maxlength="5">
+      <button class="btn-ghost" id="joinBtn">Join</button>
+    </div>
+    <div id="menuMsg"></div>
+  </div>
+</div>
+
+<!-- Connecting -->
+<div id="connectOverlay">
+  <div class="spinner"></div>
+  <div style="color:var(--dim);font-size:13.5px;" id="connectLabel">Connecting…</div>
+</div>
+
+<!-- Click-to-play gesture capture -->
+<div id="playOverlay">
+  <div class="card" style="text-align:center;">
+    <h1 style="margin-bottom:10px;">You're in</h1>
+    <div class="sub" id="playSub">Click to drop in — this also enables your microphone.</div>
+    <button class="btn-primary" id="playBtn" style="width:100%;">Enter the world</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="pill">Room <b id="hudCode">—</b> <button id="copyBtn" title="Copy code">copy</button></div>
+  <div class="pill" id="hudCount">1 here</div>
+</div>
+<div id="topRight">
+  <button id="micBtn">🎙 Mute</button>
+  <button id="leaveBtn">Leave</button>
+</div>
+
+<div id="desktopHint">WASD to move · mouse to look · click to lock cursor</div>
+
+<!-- Mobile controls -->
+<div id="joyZone"><div id="joyBase"></div><div id="joyStick"></div></div>
+<div id="lookZone"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ======================= CONFIG ======================= */
+const NS = "nearby-pv7-";           // peerjs id namespace to keep room codes short + avoid collisions
+const SNAPSHOT_HZ = 15;
+const VOICE_MAX_DIST = 22;          // beyond this, silence
+const VOICE_FULL_DIST = 3;          // within this, full volume
+const EYE_HEIGHT = 1.6;
+const MOVE_SPEED = 5.2;
+const WORLD_HALF = 40;              // ground half-size
+
+/* ======================= STATE ======================= */
+let peer = null;
+let isHost = false;
+let myRoomCode = null;
+let hostConn = null;                 // guest -> host data connection
+let clientConns = {};                 // host: id -> DataConnection
+let clientStates = {};                // host: id -> {x,y,z,rotY,name}
+let calls = {};                       // id -> MediaConnection
+let remotePlayers = {};               // id -> {mesh,label,target:{x,z,rotY},gain,ac,audioEl}
+let localStream = null;
+let micMuted = false;
+let myName = "Wanderer";
+let audioCtx = null;
+let joined = false;
+
+/* ======================= THREE SETUP ======================= */
+const canvas = document.getElementById('game');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1a16);
+scene.fog = new THREE.Fog(0x0b1a16, 18, 55);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth/window.innerHeight, 0.1, 500);
+camera.rotation.order = 'YXZ';
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* Lighting */
+scene.add(new THREE.AmbientLight(0x8fb5ac, 0.65));
+const sun = new THREE.DirectionalLight(0xfff2d8, 1.0);
+sun.position.set(20,30,10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024,1024);
+sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
+sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
+scene.add(sun);
+
+/* Ground - actual physical ground plane to stand on */
+function makeGroundTexture(){
+  const c = document.createElement('canvas'); c.width=c.height=512;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#173a30'; ctx.fillRect(0,0,512,512);
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth=2;
+  for(let i=0;i<=512;i+=32){
+    ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,512);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(512,i);ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(WORLD_HALF/2, WORLD_HALF/2);
+  return tex;
+}
+const groundGeo = new THREE.PlaneGeometry(WORLD_HALF*2, WORLD_HALF*2);
+const groundMat = new THREE.MeshStandardMaterial({map:makeGroundTexture(), roughness:0.95});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.position.y = 0;
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* A few landmark boxes so distance/orientation is readable */
+const landmarkMat = new THREE.MeshStandardMaterial({color:0x2a5c50, roughness:0.8});
+function addLandmark(x,z,w,h,d){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), landmarkMat);
+  m.position.set(x, h/2, z);
+  m.castShadow = true; m.receiveShadow = true;
+  scene.add(m);
+}
+addLandmark(8,-6,2,3,2); addLandmark(-10,10,4,2,4); addLandmark(14,14,2,5,2);
+addLandmark(-16,-14,3,2.5,3); addLandmark(0,-20,6,1.5,2);
+
+const GROUND_Y = 0; // flat world, feet always rest here
+
+/* ======================= LOCAL PLAYER ======================= */
+const player = {
+  x:0, z:0, y:GROUND_Y, yaw:0, pitch:0
+};
+
+function clampToWorld(){
+  player.x = Math.max(-WORLD_HALF+1, Math.min(WORLD_HALF-1, player.x));
+  player.z = Math.max(-WORLD_HALF+1, Math.min(WORLD_HALF-1, player.z));
+}
+
+/* ======================= REMOTE AVATARS ======================= */
+function colorForId(id){
+  let h=0; for(let i=0;i<id.length;i++) h = (h*31+id.charCodeAt(i))>>>0;
+  const hue = h % 360;
+  return new THREE.Color(`hsl(${hue},65%,55%)`);
+}
+
+function makeAvatar(id){
+  const group = new THREE.Group();
+  const color = colorForId(id);
+  const bodyMat = new THREE.MeshStandardMaterial({color, roughness:0.6});
+  const bodyGeo = (typeof THREE.CapsuleGeometry === 'function')
+    ? new THREE.CapsuleGeometry(0.35,0.9,4,8)
+    : new THREE.CylinderGeometry(0.35,0.35,1.3,8);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = 0.95;
+  body.castShadow = true;
+  group.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28,16,16), bodyMat);
+  head.position.y = 1.6;
+  head.castShadow = true;
+  group.add(head);
+  // facing indicator (nose) so you can see which way they look
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.07,0.22,8), new THREE.MeshStandardMaterial({color:0xffffff}));
+  nose.rotation.x = Math.PI/2;
+  nose.position.set(0,1.6,0.3);
+  group.add(nose);
+
+  // name label via sprite
+  const label = makeLabelSprite(id);
+  label.position.y = 2.15;
+  group.add(label);
+
+  group.position.set(0, GROUND_Y, 0);
+  scene.add(group);
+  return {group, nose, label};
+}
+
+function makeLabelSprite(text){
+  const c = document.createElement('canvas'); c.width=256; c.height=64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = 'rgba(10,20,18,0.0)'; ctx.fillRect(0,0,256,64);
+  ctx.font = '600 30px system-ui, sans-serif';
+  ctx.fillStyle = '#eafaf4';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.shadowColor='#000'; ctx.shadowBlur=6;
+  ctx.fillText(text.slice(0,16), 128, 34);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({map:tex, depthTest:false});
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(1.8,0.45,1);
+  sprite._canvas = c; sprite._ctx = ctx; sprite._tex = tex;
+  return sprite;
+}
+function setLabelText(sprite, text){
+  const ctx = sprite._ctx, c = sprite._canvas;
+  ctx.clearRect(0,0,256,64);
+  ctx.font = '600 30px system-ui, sans-serif';
+  ctx.fillStyle = '#eafaf4';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.shadowColor='#000'; ctx.shadowBlur=6;
+  ctx.fillText(text.slice(0,16), 128, 34);
+  sprite._tex.needsUpdate = true;
+}
+
+/* ======================= INPUT ======================= */
+const keys = {};
+window.addEventListener('keydown', e=>{ keys[e.code]=true; });
+window.addEventListener('keyup', e=>{ keys[e.code]=false; });
+
+let pointerLocked = false;
+canvas.addEventListener('click', ()=>{
+  if(joined && !isTouchDevice()) canvas.requestPointerLock();
+});
+document.addEventListener('pointerlockchange', ()=>{
+  pointerLocked = document.pointerLockElement === canvas;
+});
+document.addEventListener('mousemove', e=>{
+  if(!pointerLocked) return;
+  player.yaw -= e.movementX * 0.0022;
+  player.pitch -= e.movementY * 0.0022;
+  player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch));
+});
+
+function isTouchDevice(){
+  return ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+}
+
+/* Mobile joystick (movement) */
+const joyZone = document.getElementById('joyZone');
+const joyStick = document.getElementById('joyStick');
+let joyActive = false, joyTouchId = null, joyCenter={x:0,y:0}, joyVec={x:0,y:0};
+const JOY_RADIUS = 46;
+
+joyZone.addEventListener('touchstart', e=>{
+  const t = e.changedTouches[0];
+  joyActive = true; joyTouchId = t.identifier;
+  const rect = joyZone.getBoundingClientRect();
+  joyCenter = {x:rect.left+rect.width/2, y:rect.top+rect.height/2};
+  e.preventDefault();
+},{passive:false});
+
+joyZone.addEventListener('touchmove', e=>{
+  for(const t of e.changedTouches){
+    if(t.identifier===joyTouchId){
+      let dx = t.clientX-joyCenter.x, dy = t.clientY-joyCenter.y;
+      const dist = Math.min(JOY_RADIUS, Math.hypot(dx,dy));
+      const ang = Math.atan2(dy,dx);
+      dx = Math.cos(ang)*dist; dy = Math.sin(ang)*dist;
+      joyStick.style.left = (37+dx)+'px';
+      joyStick.style.top = (37+dy)+'px';
+      // forward positive when dragged UP (screen y decreases) -> -dy
+      joyVec.x = dx/JOY_RADIUS;      // right positive
+      joyVec.y = -dy/JOY_RADIUS;     // forward positive
+    }
+  }
+  e.preventDefault();
+},{passive:false});
+
+function joyReset(e){
+  for(const t of e.changedTouches){
+    if(t.identifier===joyTouchId){
+      joyActive=false; joyTouchId=null; joyVec={x:0,y:0};
+      joyStick.style.left='37px'; joyStick.style.top='37px';
+    }
+  }
+}
+joyZone.addEventListener('touchend', joyReset);
+joyZone.addEventListener('touchcancel', joyReset);
+
+/* Mobile look zone (right side drag to look around) */
+const lookZone = document.getElementById('lookZone');
+let lookTouchId = null, lookLast = {x:0,y:0};
+lookZone.addEventListener('touchstart', e=>{
+  const t = e.changedTouches[0];
+  lookTouchId = t.identifier;
+  lookLast = {x:t.clientX, y:t.clientY};
+  e.preventDefault();
+},{passive:false});
+lookZone.addEventListener('touchmove', e=>{
+  for(const t of e.changedTouches){
+    if(t.identifier===lookTouchId){
+      const dx = t.clientX-lookLast.x, dy = t.clientY-lookLast.y;
+      lookLast = {x:t.clientX,y:t.clientY};
+      player.yaw -= dx*0.0032;
+      player.pitch -= dy*0.0032;
+      player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch));
+    }
+  }
+  e.preventDefault();
+},{passive:false});
+function lookReset(e){
+  for(const t of e.changedTouches){ if(t.identifier===lookTouchId) lookTouchId=null; }
+}
+lookZone.addEventListener('touchend', lookReset);
+lookZone.addEventListener('touchcancel', lookReset);
+
+/* ======================= MOVEMENT ======================= */
+let lastTime = performance.now();
+function updateMovement(dt){
+  let moveF = 0, moveR = 0;
+  if(keys['KeyW']||keys['ArrowUp']) moveF += 1;
+  if(keys['KeyS']||keys['ArrowDown']) moveF -= 1;
+  if(keys['KeyD']||keys['ArrowRight']) moveR += 1;
+  if(keys['KeyA']||keys['ArrowLeft']) moveR -= 1;
+
+  moveF += joyVec.y;
+  moveR += joyVec.x;
+
+  const len = Math.hypot(moveF, moveR);
+  if(len > 1){ moveF/=len; moveR/=len; }
+
+  const yaw = player.yaw;
+  // forward vector for camera facing -Z at yaw 0
+  const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+  // right vector = cross(forward, up) -> consistent, fixes left/right swap
+  const rx = Math.cos(yaw), rz = -Math.sin(yaw);
+
+  const speed = MOVE_SPEED * dt;
+  player.x += (fx*moveF + rx*moveR) * speed;
+  player.z += (fz*moveF + rz*moveR) * speed;
+  clampToWorld();
+}
+
+/* ======================= NETWORKING ======================= */
+function randomCode(len){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s=''; for(let i=0;i<len;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
+
+function showMenuError(msg){
+  document.getElementById('menuMsg').textContent = msg;
+}
+function showConnecting(label){
+  document.getElementById('connectLabel').textContent = label;
+  document.getElementById('connectOverlay').style.display='flex';
+}
+function hideConnecting(){
+  document.getElementById('connectOverlay').style.display='none';
+}
+function showToast(msg, ms){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display='block';
+  clearTimeout(showToast._h);
+  showToast._h = setTimeout(()=>{ t.style.display='none'; }, ms||2600);
+}
+
+function destroyPeerSafely(){
+  try{ if(peer && !peer.destroyed) peer.destroy(); }catch(e){}
+  peer = null;
+}
+
+/* ---- Create room (become host) ---- */
+function createRoom(){
+  showMenuError('');
+  showConnecting('Creating room…');
+  attemptCreate(0);
+}
+function attemptCreate(tries){
+  if(tries > 4){ hideConnecting(); showMenuError('Could not reach the network. Check your connection and try again.'); return; }
+  const code = randomCode(5);
+  destroyPeerSafely();
+  let settled = false;
+  peer = new Peer(NS+code);
+  const timeout = setTimeout(()=>{
+    if(!settled){ settled=true; peer.destroy(); attemptCreate(tries+1); }
+  }, 7000);
+
+  peer.on('open', ()=>{
+    if(settled) return; settled=true; clearTimeout(timeout);
+    isHost = true; myRoomCode = code;
+    hideConnecting();
+    enterWorld();
+  });
+  peer.on('error', (err)=>{
+    if(settled) return;
+    if(err.type === 'unavailable-id'){ settled=true; clearTimeout(timeout); attemptCreate(tries+1); }
+    else { settled=true; clearTimeout(timeout); hideConnecting(); showMenuError('Network error: '+err.type); }
+  });
+
+  peer.on('connection', conn=>{
+    setupHostConnection(conn);
+  });
+  peer.on('call', call=>{
+    call.answer(localStream || undefined);
+    wireCall(call, call.peer);
+  });
+}
+
+/* ---- Join room (guest) ---- */
+function joinRoom(codeRaw){
+  const code = (codeRaw||'').trim().toUpperCase();
+  showMenuError('');
+  if(code.length < 3){ showMenuError('Enter a room code.'); return; }
+  showConnecting('Looking for room '+code+'…');
+
+  destroyPeerSafely();
+  peer = new Peer();
+  let settled = false;
+
+  peer.on('open', ()=>{
+    const targetId = NS+code;
+    const conn = peer.connect(targetId, {reliable:true, metadata:{name:myName}});
+    let opened = false;
+
+    const failTimeout = setTimeout(()=>{
+      if(!opened && !settled){
+        settled = true;
+        try{conn.close();}catch(e){}
+        hideConnecting();
+        showMenuError('Room "'+code+'" is not valid or is offline.');
+      }
+    }, 6500);
+
+    conn.on('open', ()=>{
+      opened = true;
+      if(settled) return; settled = true;
+      clearTimeout(failTimeout);
+      isHost = false; myRoomCode = code;
+      hostConn = conn;
+      wireGuestConnection(conn);
+
+      conn.send({
+        type:"state",
+        x:player.x,
+        z:player.z,
+        rotY:player.yaw,
+        name:myName
+      });
+
+      hideConnecting();
+      enterWorld();
+    });
+    conn.on('error', ()=>{
+      if(settled) return; settled = true;
+      clearTimeout(failTimeout);
+      hideConnecting();
+      showMenuError('Room "'+code+'" is not valid or is offline.');
+    });
+  });
+
+  peer.on('call', call=>{
+    call.answer(localStream || undefined);
+    wireCall(call, call.peer);
+  });
+
+  peer.on('error', (err)=>{
+    if(settled) return;
+    if(err.type === 'peer-unavailable'){
+      settled = true;
+      hideConnecting();
+      showMenuError('Room "'+code+'" is not valid or is offline.');
+    } else {
+      settled = true;
+      hideConnecting();
+      showMenuError('Network error: '+err.type);
+    }
+  });
+}
+
+/* ---- Host broadcast: builds + sends the current player snapshot to every guest ---- */
+function hostBroadcast(){
+  if(!isHost || !peer) return;
+  const playersOut = {};
+  playersOut[peer.id] = {x:player.x, z:player.z, rotY:player.yaw, name:myName};
+  for(const id in clientStates) playersOut[id] = clientStates[id];
+  const packet = {type:'snapshot', players:playersOut, hostId:peer.id};
+  for(const id in clientConns){
+    try{ clientConns[id].send(packet); }catch(e){}
+  }
+  applySnapshot(playersOut, peer.id);
+}
+
+/* ---- Host-side connection bookkeeping ---- */
+function setupHostConnection(conn){
+  const id = conn.peer;
+  clientConns[id] = conn;
+  const guestName = (conn.metadata && conn.metadata.name) ?
+ conn.metadata.name : 'Wanderer';
+  clientStates[id] = {x:0,y:GROUND_Y,z:0,rotY:0,name:guestName};
+
+  conn.on('open', ()=>{
+    hostBroadcast();
+  });
+
+
+
+  conn.on('data', data=>{
+    if(data.type === 'state'){
+      clientStates[id] = {x:data.x,y:GROUND_Y,z:data.z,rotY:data.rotY,name:data.name||guestName};
+      hostBroadcast();
+    }
+  });
+  conn.on('close', ()=>{
+    delete clientConns[id];
+    delete clientStates[id];
+    removeRemote(id);
+  });
+  conn.on('error', ()=>{
+    delete clientConns[id];
+    delete clientStates[id];
+    removeRemote(id);
+  });
+}
+
+/* ---- Guest-side connection ---- */
+function wireGuestConnection(conn){
+  conn.on('data', data=>{
+    if(data.type === 'snapshot'){
+      applySnapshot(data.players, data.hostId);
+    }
+  });
+  conn.on('close', ()=>{
+    showToast('Lost connection to host.');
+    for(const id in remotePlayers) removeRemote(id);
+  });
+}
+
+/* ---- Snapshot application (guest receives; also used locally by host) ---- */
+let knownIds = new Set();
+function applySnapshot(playersObj, hostId){
+  const ids = Object.keys(playersObj);
+  const nowSet = new Set(ids);
+
+  document.getElementById('hudCount').textContent = ids.length + (ids.length===1?' here':' people here');
+
+  // new arrivals
+  for(const id of ids){
+    if(id === peer.id) continue;
+    const p = playersObj[id];
+    if(!remotePlayers[id]){
+      try{
+        const av = makeAvatar(id);
+        remotePlayers[id] = {group:av.group, nose:av.nose, label:av.label,
+          target:{x:p.x,z:p.z,rotY:p.rotY}, name:p.name, gain:null};
+        setLabelText(av.label, p.name||'Wanderer');
+        maybeStartVoice(id);
+      }catch(e){
+        console.warn('avatar creation failed for', id, e);
+      }
+    } else {
+      remotePlayers[id].target.x = p.x;
+      remotePlayers[id].target.z = p.z;
+      remotePlayers[id].target.rotY = p.rotY;
+      if(remotePlayers[id].name !== p.name){
+        remotePlayers[id].name = p.name;
+        setLabelText(remotePlayers[id].label, p.name||'Wanderer');
+      }
+    }
+  }
+  // departures
+  for(const id of Object.keys(remotePlayers)){
+    if(!nowSet.has(id)) removeRemote(id);
+  }
+  knownIds = nowSet;
+}
+
+function removeRemote(id){
+  const r = remotePlayers[id];
+  if(r){
+    scene.remove(r.group);
+    delete remotePlayers[id];
+  }
+  const call = calls[id];
+  if(call){ try{call.close();}catch(e){} delete calls[id]; }
+}
+
+/* ---- Voice mesh: initiate a call to a newly-known peer id ---- */
+function maybeStartVoice(id){
+  if(!peer || id === peer.id) return;
+  if(calls[id]) return;
+  if(!localStream) return; // can't initiate without a stream; we can still receive incoming calls
+  // avoid both sides calling each other: lower id calls the higher id
+  if(peer.id < id){
+    const call = peer.call(id, localStream);
+    wireCall(call, id);
+  }
+}
+
+function wireCall(call, id){
+  calls[id] = call;
+  call.on('stream', remoteStream=>{
+    setupSpatialAudio(id, remoteStream);
+  });
+  call.on('close', ()=>{ delete calls[id]; });
+  call.on('error', ()=>{ delete calls[id]; });
+}
+
+function setupSpatialAudio(id, stream){
+  if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  try{
+    const src = audioCtx.createMediaStreamSource(stream);
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0;
+    src.connect(gain).connect(audioCtx.destination);
+    if(!remotePlayers[id]) remotePlayers[id] = {target:{x:0,z:0,rotY:0}};
+    remotePlayers[id].gain = gain;
+  }catch(e){
+    console.warn('audio graph failed', e);
+  }
+}
+
+/* ======================= HOST BROADCAST LOOP ======================= */
+setInterval(()=>{
+  if(!joined) return;
+  if(isHost){
+    hostBroadcast();
+  } else {
+    if(hostConn && hostConn.open){
+      try{
+        hostConn.send({type:'state', x:player.x, z:player.z, rotY:player.yaw, name:myName});
+      }catch(e){}
+    }
+  }
+}, 1000/SNAPSHOT_HZ);
+
+/* ======================= MIC ======================= */
+async function requestMic(){
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true}});
+  }catch(e){
+    localStream = null;
+    alert(e.name + "\n" + e.message);
+}
+  }
+
+document.getElementById('micBtn').addEventListener('click', ()=>{
+  if(!localStream){ showToast('No microphone available.'); return; }
+  micMuted = !micMuted;
+  localStream.getAudioTracks().forEach(t=> t.enabled = !micMuted);
+  const btn = document.getElementById('micBtn');
+  btn.textContent = micMuted ? '🔇 Muted' : '🎙 Mute';
+  btn.classList.toggle('muted', micMuted);
+});
+
+document.getElementById('leaveBtn').addEventListener('click', ()=>{
+  window.location.reload();
+});
+
+/* ======================= UI WIRING ======================= */
+document.getElementById('createBtn').addEventListener('click', ()=>{
+  myName = (document.getElementById('nameInput').value||'').trim() || 'Wanderer';
+  createRoom();
+});
+document.getElementById('joinBtn').addEventListener('click', ()=>{
+  myName = (document.getElementById('nameInput').value||'').trim() || 'Wanderer';
+  joinRoom(document.getElementById('codeInput').value);
+});
+document.getElementById('codeInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter') document.getElementById('joinBtn').click();
+});
+document.getElementById('copyBtn').addEventListener('click', ()=>{
+  if(!myRoomCode) return;
+  navigator.clipboard && navigator.clipboard.writeText(myRoomCode).then(()=>{
+    showToast('Room code copied: '+myRoomCode);
+  }).catch(()=>{ showToast('Room code: '+myRoomCode); });
+});
+
+document.getElementById('playBtn').addEventListener('click', async ()=>{
+  document.getElementById('playOverlay').style.display='none';
+  await requestMic();
+  document.getElementById('crosshair').style.display = 'block';
+  if(isTouchDevice()){
+    document.getElementById('joyZone').style.display='block';
+    document.getElementById('lookZone').style.display='block';
+  } else {
+    document.getElementById('desktopHint').style.display='block';
+    canvas.requestPointerLock();
+  }
+  // answer any calls that come in from peers who already have our (now available) stream
+  for(const id in remotePlayers) maybeStartVoice(id);
+});
+
+/* ======================= ENTER WORLD FLOW ======================= */
+function enterWorld(){
+joined = true;
+
+  document.getElementById('menu').style.display='none';
+  document.getElementById('hud').style.display='flex';
+  document.getElementById('topRight').style.display='flex';
+  document.getElementById('hudCode').textContent = myRoomCode;
+  document.getElementById('playSub').textContent = isHost
+    ? 'You created room '+myRoomCode+'. Share the code so others can join. Clicking below enables your microphone.'
+    : 'You joined room '+myRoomCode+'. Clicking below enables your microphone.';
+  document.getElementById('playOverlay').style.display='flex';
+}
+
+/* ======================= RENDER LOOP ======================= */
+function tick(){
+  requestAnimationFrame(tick);
+  const now = performance.now();
+  const dt = Math.min(0.05, (now-lastTime)/1000);
+  lastTime = now;
+
+  if(joined){
+    updateMovement(dt);
+
+    camera.position.set(player.x, GROUND_Y+EYE_HEIGHT, player.z);
+    camera.rotation.x = player.pitch;
+    camera.rotation.y = player.yaw;
+
+    // interpolate + render remote avatars, update spatial audio gain
+    for(const id in remotePlayers){
+      const r = remotePlayers[id];
+      if(r.group){
+        r.group.position.x += (r.target.x - r.group.position.x)*Math.min(1, dt*10);
+        r.group.position.z += (r.target.z - r.group.position.z)*Math.min(1, dt*10);
+        r.group.rotation.y = r.target.rotY;
+        const dx = r.group.position.x-player.x, dz = r.group.position.z-player.z;
+        const dist = Math.hypot(dx,dz);
+        if(r.gain){
+          let g = 1 - (dist-VOICE_FULL_DIST)/(VOICE_MAX_DIST-VOICE_FULL_DIST);
+          g = Math.max(0, Math.min(1, g));
+          r.gain.gain.value = g;
+        }
+      } else if(r.gain){
+        // stream arrived before avatar existed (rare) - still fine, will attach next snapshot
+      }
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+tick();
+
+/* ======================= SAFETY NET ======================= */
+window.addEventListener('error', (e)=>{
+  console.warn('Caught error:', e.message);
+});
+window.addEventListener('unhandledrejection', (e)=>{
+  console.warn('Caught rejection:', e.reason);
+});
+
+})();
+</script>
+</body>
+</html>
